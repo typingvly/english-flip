@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "A single player's unified global leaderboard entry storing their unique nickname, highest flip count, and rank tier.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "description": "Unique client-generated player identifier ensuring one ranking entry per user.",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "description": "Player's display nickname (2-16 chars, Korean/English/digits/_/-).",
+          "minLength": 2,
+          "maxLength": 16,
+          "pattern": "^[a-zA-Z0-9가-힣_-]+$"
+        },
+        "nicknameKey": {
+          "type": "string",
+          "description": "Lowercased canonical nickname used for case-insensitive duplicate prevention.",
+          "minLength": 2,
+          "maxLength": 16,
+          "pattern": "^[a-z0-9가-힣_-]+$"
+        },
+        "bestFlips": {
+          "type": "integer",
+          "description": "Player's highest number of tile flips achieved in a 60-second match."
+        },
+        "rank": {
+          "type": "string",
+          "description": "Rank tier derived from bestFlips.",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest update."
+        }
+      },
+      "required": [
+        "playerId",
+        "nickname",
+        "nicknameKey",
+        "bestFlips",
+        "rank",
+        "updatedAt"
+      ]
+    },
+    "NicknameLock": {
+      "title": "NicknameLock",
+      "description": "Atomic uniqueness lock mapping a canonical lowercased nickname to a single playerId.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "description": "Owner playerId holding this nickname.",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "description": "Display casing of the claimed nickname.",
+          "minLength": 2,
+          "maxLength": 16,
+          "pattern": "^[a-zA-Z0-9가-힣_-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the nickname was claimed."
+        }
+      },
+      "required": [
+        "playerId",
+        "nickname",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardEntry"
+      },
+      "description": "Unified global leaderboard entries keyed by playerId so each player holds at most one ranking."
+    },
+    "/nicknames/{nicknameKey}": {
+      "schema": {
+        "$ref": "#/entities/NicknameLock"
+      },
+      "description": "Uniqueness index keyed by lowercased nickname to prevent duplicate nicknames across players."
+    }
+  }
+}

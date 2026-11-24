@@ -1,0 +1,6 @@
+{
+  "name": "영어 판뒤집기",
+  "description": "AI와 1분간 대결하는 미니멀 영어 단어 판뒤집기 타이핑 게임",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

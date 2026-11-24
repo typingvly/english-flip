@@ -1,0 +1,6 @@
+{
+  "summary":  "글로벌 리더보드, 첫 접속 닉네임 필수 등록(중복 불가), 시상식 아이콘 진입 버튼, 소리 설정 내 닉네임 변경 기능 및 Firestore 데이터 연동 구현 계획서",
+  "updatedAt":  "2026-11-24T09:36:18.274307343Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

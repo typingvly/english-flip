@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string &&
+        id.size() >= 8 &&
+        id.size() <= 64 &&
+        id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidNickname(name) {
+      return name is string &&
+        name.size() >= 2 &&
+        name.size() <= 16 &&
+        name.matches('^[a-zA-Z0-9가-힣_\\-]+$');
+    }
+
+    function isValidNicknameKey(key) {
+      return key is string &&
+        key.size() >= 2 &&
+        key.size() <= 16 &&
+        key.matches('^[a-z0-9가-힣_\\-]+$');
+    }
+
+    function isValidRank(rank) {
+      return rank is string &&
+        rank.size() >= 1 &&
+        rank.size() <= 16 &&
+        rank in [
+          'L을가져가', 'L+', 'L',
+          'X+', 'X', 'X-',
+          'SS+', 'SS', 'SS-',
+          'S+', 'S', 'S-',
+          'A+', 'A',
+          'B+', 'B',
+          'C+', 'C',
+          'D+', 'D',
+          'E+', 'E'
+        ];
+    }
+
+    function isValidLeaderboardEntry(data, playerId) {
+      return data.keys().hasAll([
+          'playerId',
+          'nickname',
+          'nicknameKey',
+          'bestFlips',
+          'rank',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'playerId',
+          'nickname',
+          'nicknameKey',
+          'bestFlips',
+          'rank',
+          'updatedAt'
+        ]) &&
+        isValidId(data.playerId) &&
+        data.playerId == playerId &&
+        isValidNickname(data.nickname) &&
+        isValidNicknameKey(data.nicknameKey) &&
+        data.nickname.lower() == data.nicknameKey &&
+        data.bestFlips is int &&
+        data.bestFlips >= 0 &&
+        data.bestFlips <= 500 &&
+        isValidRank(data.rank) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidNicknameLock(data, nicknameKey) {
+      return data.keys().hasAll(['playerId', 'nickname', 'updatedAt']) &&
+        data.keys().hasOnly(['playerId', 'nickname', 'updatedAt']) &&
+        isValidId(data.playerId) &&
+        isValidNickname(data.nickname) &&
+        data.nickname.lower() == nicknameKey &&
+        data.updatedAt == request.time;
+    }
+
+    // Connection check path
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Unified global leaderboard: one document per playerId
+    match /leaderboard/{playerId} {
+      allow get: if isValidId(playerId);
+      allow list: if resource.data.bestFlips >= 0;
+
+      allow create: if isValidId(playerId) &&
+        isValidLeaderboardEntry(incoming(), playerId) &&
+        existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
+        getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId;
+
+      allow update: if isValidId(playerId) &&
+        isValidLeaderboardEntry(incoming(), playerId) &&
+        incoming().playerId == existing().playerId &&
+        (
+          // Action 1: Update personal high score (strictly increasing)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['bestFlips', 'rank', 'updatedAt']) &&
+            incoming().bestFlips > existing().bestFlips
+          ) ||
+          // Action 2: Rename nickname to a different key atomically
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'nicknameKey', 'updatedAt']) &&
+            incoming().nicknameKey != existing().nicknameKey &&
+            existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
+            getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId &&
+            !existsAfter(/databases/$(database)/documents/nicknames/$(existing().nicknameKey))
+          ) ||
+          // Action 3: Change display casing of the same nicknameKey
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'updatedAt']) &&
+            incoming().nicknameKey == existing().nicknameKey &&
+            incoming().nickname != existing().nickname
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // Atomic uniqueness index for nicknames
+    match /nicknames/{nicknameKey} {
+      allow get: if isValidNicknameKey(nicknameKey);
+      allow list: if false;
+
+      allow create: if isValidNicknameKey(nicknameKey) &&
+        isValidNicknameLock(incoming(), nicknameKey) &&
+        existsAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)) &&
+        getAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)).data.nicknameKey == nicknameKey;
+
+      allow update: if isValidNicknameKey(nicknameKey) &&
+        isValidNicknameLock(incoming(), nicknameKey) &&
+        incoming().playerId == existing().playerId;
+
+      allow delete: if isValidNicknameKey(nicknameKey) &&
+        existsAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)) &&
+        getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.playerId == existing().playerId &&
+        getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.nicknameKey != nicknameKey;
+    }
+  }
+}
