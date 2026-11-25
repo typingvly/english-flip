@@ -60,11 +60,106 @@ export interface TileItem {
   lastFlippedBy: TeamOwner | null;
 }
 
+export interface PaceBucket {
+  label: string;
+  cpm: number;
+  flips: number;
+}
+
+export interface WeakWordStat {
+  word: string;
+  mistakes: number;
+  avgMs: number;
+}
+
+export interface MatchReport {
+  flips: number;
+  aiFlips: number;
+  aiSpeed: DifficultySpeed;
+  durationSec: number;
+  cpm: number;
+  rawCpm: number;
+  accuracy: number;
+  avgSecPerWord: number;
+  paceBuckets: PaceBucket[];
+  weakWords: WeakWordStat[];
+  verified: boolean;
+  pendingApproval?: boolean;
+  cheatReason: string | null;
+}
+
+export type ModerationCategory = 'high_score' | 'suspicious';
+export type ModerationStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ModerationReport {
+  reportId: string;
+  playerId: string;
+  nickname: string;
+  category: ModerationCategory;
+  status: ModerationStatus;
+  reason: string;
+  flips: number;
+  aiFlips: number;
+  aiSpeed: DifficultySpeed;
+  cpm: number;
+  rawCpm: number;
+  accuracy: number;
+  elapsedSec: number;
+  untrustedCount: number;
+  bulkInjectionCount: number;
+  pasteBlockedCount: number;
+  interKeyMeanMs: number;
+  interKeyStdDevMs: number;
+  paceCpms: number[];
+  createdAtMs: number;
+  reviewedAtMs?: number;
+  adminAction?: string;
+}
+
+export interface PlayerControlState {
+  playerId: string;
+  recordEpoch: number;
+  forcedBestFlips: number;
+  isRemoved: boolean;
+  forcedNickname?: string;
+}
+
+export interface PlayerMatchRecord {
+  matchId: string;
+  playerId: string;
+  flips: number;
+  aiFlips: number;
+  aiSpeed: DifficultySpeed;
+  won: boolean;
+  cpm: number;
+  rawCpm: number;
+  accuracy: number;
+  rank: string;
+  createdAtMs: number;
+}
+
+export interface PlayerProfileStats {
+  playerId: string;
+  totalGames: number;
+  wins: number;
+  bestFlips: number;
+  bestCpm: number;
+  totalAccuracySum: number;
+  recentMatches: PlayerMatchRecord[];
+}
+
+export type AppLanguage = 'ko' | 'en';
+
 export interface GameSettings {
+  language: AppLanguage;
   themeId: ThemeId;
   customTheme: CustomThemeColors;
   fontId: FontId;
   swapSides: boolean;
+  focusMode: boolean;
+  hasCustomBackground: boolean;
+  backgroundBlur: number;
+  backgroundDim: number;
   sfxEnabled: boolean;
   sfxVolume: number;
   sfxTyping: boolean;

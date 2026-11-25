@@ -2,12 +2,26 @@
   "entities": {
     "LeaderboardEntry": {
       "title": "LeaderboardEntry",
-      "description": "A single player's unified global leaderboard entry storing their unique nickname, highest flip count, and rank tier.",
+      "description": "A single player's unified global leaderboard entry storing their unique nickname, highest verified flip count, optional peak CPM/accuracy, rank tier, test-account visibility flag, and server record epoch.",
       "type": "object",
       "properties": {
         "playerId": {
           "type": "string",
-          "description": "Unique client-generated player identifier ensuring one ranking entry per user.",
+          "description": "Unique player identifier (Firebase Auth UID for signed-in Google players).",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Verified Firebase Auth UID owning this leaderboard entry.",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "migratedFromId": {
+          "type": "string",
+          "description": "Legacy pre-auth playerId from which this entry was atomically migrated.",
           "minLength": 8,
           "maxLength": 64,
           "pattern": "^[a-zA-Z0-9_-]+$"
@@ -28,13 +42,29 @@
         },
         "bestFlips": {
           "type": "integer",
-          "description": "Player's highest number of tile flips achieved in a 60-second match."
+          "description": "Player's highest verified number of tile flips achieved in a 60-second match (0-320)."
+        },
+        "bestCpm": {
+          "type": "integer",
+          "description": "Optional net CPM achieved during the personal best match (0-1800)."
+        },
+        "bestAccuracy": {
+          "type": "number",
+          "description": "Optional accuracy percentage achieved during the personal best match (0-100)."
         },
         "rank": {
           "type": "string",
           "description": "Rank tier derived from bestFlips.",
           "minLength": 1,
           "maxLength": 16
+        },
+        "isTestAccount": {
+          "type": "boolean",
+          "description": "When true, the account is excluded from public leaderboard rankings."
+        },
+        "recordEpoch": {
+          "type": "integer",
+          "description": "Server-authoritative epoch incremented whenever an admin modifies, resets, or force-renames this player."
         },
         "updatedAt": {
           "type": "string",
@@ -81,6 +111,271 @@
         "nickname",
         "updatedAt"
       ]
+    },
+    "PlayerStats": {
+      "title": "PlayerStats",
+      "description": "Cumulative verified match telemetry summary for a playerId.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "totalGames": {
+          "type": "integer",
+          "description": "Total number of verified matches completed."
+        },
+        "wins": {
+          "type": "integer",
+          "description": "Total number of verified wins against AI."
+        },
+        "bestFlips": {
+          "type": "integer",
+          "description": "Highest verified flips across all matches."
+        },
+        "bestCpm": {
+          "type": "integer",
+          "description": "Highest verified net CPM across all matches."
+        },
+        "totalAccuracySum": {
+          "type": "number",
+          "description": "Cumulative sum of match accuracies for average calculation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest match update."
+        }
+      },
+      "required": [
+        "playerId",
+        "totalGames",
+        "wins",
+        "bestFlips",
+        "bestCpm",
+        "totalAccuracySum",
+        "updatedAt"
+      ]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Immutable verified 60-second match summary record belonging to a playerStats parent.",
+      "type": "object",
+      "properties": {
+        "matchId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "playerId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "flips": {
+          "type": "integer"
+        },
+        "aiFlips": {
+          "type": "integer"
+        },
+        "aiSpeed": {
+          "type": "integer",
+          "enum": [200, 400, 600, 800]
+        },
+        "won": {
+          "type": "boolean"
+        },
+        "cpm": {
+          "type": "integer"
+        },
+        "rawCpm": {
+          "type": "integer"
+        },
+        "accuracy": {
+          "type": "number"
+        },
+        "rank": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "matchId",
+        "playerId",
+        "flips",
+        "aiFlips",
+        "aiSpeed",
+        "won",
+        "cpm",
+        "rawCpm",
+        "accuracy",
+        "rank",
+        "createdAt"
+      ]
+    },
+    "PlayerControl": {
+      "title": "PlayerControl",
+      "description": "Admin-managed server synchronization directive ensuring deleted, reset, or force-renamed records override client localStorage.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "recordEpoch": {
+          "type": "integer",
+          "description": "Monotonically incremented by admin whenever local cache must be invalidated."
+        },
+        "forcedBestFlips": {
+          "type": "integer",
+          "description": "Authoritative bestFlips after admin intervention (0-320)."
+        },
+        "isRemoved": {
+          "type": "boolean",
+          "description": "True if the player's leaderboard entry was completely deleted by admin."
+        },
+        "forcedNickname": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16,
+          "pattern": "^[a-zA-Z0-9가-힣_-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "playerId",
+        "recordEpoch",
+        "forcedBestFlips",
+        "isRemoved",
+        "updatedAt"
+      ]
+    },
+    "ModerationReport": {
+      "title": "ModerationReport",
+      "description": "High-score (>=220 flips) approval request or suspicious anti-cheat telemetry report for admin review.",
+      "type": "object",
+      "properties": {
+        "reportId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "playerId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "category": {
+          "type": "string",
+          "enum": ["high_score", "suspicious"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "flips": {
+          "type": "integer"
+        },
+        "aiFlips": {
+          "type": "integer"
+        },
+        "aiSpeed": {
+          "type": "integer",
+          "enum": [200, 400, 600, 800]
+        },
+        "cpm": {
+          "type": "integer"
+        },
+        "rawCpm": {
+          "type": "integer"
+        },
+        "accuracy": {
+          "type": "number"
+        },
+        "elapsedSec": {
+          "type": "number"
+        },
+        "untrustedCount": {
+          "type": "integer"
+        },
+        "bulkInjectionCount": {
+          "type": "integer"
+        },
+        "pasteBlockedCount": {
+          "type": "integer"
+        },
+        "interKeyMeanMs": {
+          "type": "number"
+        },
+        "interKeyStdDevMs": {
+          "type": "number"
+        },
+        "paceCpms": {
+          "type": "array",
+          "description": "Six 10-second interval CPM values (0-60s)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reviewedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "adminAction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "reportId",
+        "playerId",
+        "nickname",
+        "category",
+        "status",
+        "reason",
+        "flips",
+        "aiFlips",
+        "aiSpeed",
+        "cpm",
+        "rawCpm",
+        "accuracy",
+        "elapsedSec",
+        "untrustedCount",
+        "bulkInjectionCount",
+        "pasteBlockedCount",
+        "interKeyMeanMs",
+        "interKeyStdDevMs",
+        "paceCpms",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -95,6 +390,30 @@
         "$ref": "#/entities/NicknameLock"
       },
       "description": "Uniqueness index keyed by lowercased nickname to prevent duplicate nicknames across players."
+    },
+    "/playerStats/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerStats"
+      },
+      "description": "Aggregate verified match statistics per playerId."
+    },
+    "/playerStats/{playerId}/matches/{matchId}": {
+      "schema": {
+        "$ref": "#/entities/MatchRecord"
+      },
+      "description": "Append-only verified match history records scoped under playerStats/{playerId}."
+    },
+    "/playerControls/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerControl"
+      },
+      "description": "Admin-managed epoch directives for overriding client localStorage after admin reset/deletion/rename."
+    },
+    "/moderationReports/{reportId}": {
+      "schema": {
+        "$ref": "#/entities/ModerationReport"
+      },
+      "description": "Pending and reviewed high-score (>=220) approvals and suspicious anti-cheat reports readable only by admin."
     }
   }
 }

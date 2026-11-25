@@ -14,6 +14,23 @@ service cloud.firestore {
       return resource.data;
     }
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email == 'semajinpark@gmail.com';
+    }
+
+    function isOwnerOrAdmin(playerId) {
+      return isVerifiedUser() && (isAdmin() || request.auth.uid == playerId);
+    }
+
     function isValidId(id) {
       return id is string &&
         id.size() >= 8 &&
@@ -63,22 +80,47 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'playerId',
+          'ownerUid',
+          'migratedFromId',
           'nickname',
           'nicknameKey',
           'bestFlips',
+          'bestCpm',
+          'bestAccuracy',
           'rank',
+          'isTestAccount',
+          'recordEpoch',
           'updatedAt'
         ]) &&
         isValidId(data.playerId) &&
         data.playerId == playerId &&
+        (!('ownerUid' in data) || isValidId(data.ownerUid)) &&
+        (!('migratedFromId' in data) || (isValidId(data.migratedFromId) && data.migratedFromId != playerId)) &&
         isValidNickname(data.nickname) &&
         isValidNicknameKey(data.nicknameKey) &&
         data.nickname.lower() == data.nicknameKey &&
         data.bestFlips is int &&
         data.bestFlips >= 0 &&
-        data.bestFlips <= 500 &&
+        data.bestFlips <= 320 &&
+        (!('bestCpm' in data) || (data.bestCpm is int && data.bestCpm >= 0 && data.bestCpm <= 1800)) &&
+        (!('bestAccuracy' in data) || (data.bestAccuracy is number && data.bestAccuracy >= 0 && data.bestAccuracy <= 100)) &&
+        (!('isTestAccount' in data) || data.isTestAccount is bool) &&
+        (!('recordEpoch' in data) || (data.recordEpoch is int && data.recordEpoch >= 0 && data.recordEpoch <= 1000000)) &&
         isValidRank(data.rank) &&
         data.updatedAt == request.time;
+    }
+
+    function matchesLegacyEntry(data, legacy) {
+      return !('ownerUid' in legacy) &&
+        legacy.nicknameKey != 'semistry' &&
+        data.bestFlips == legacy.bestFlips &&
+        data.rank == legacy.rank &&
+        data.nickname == legacy.nickname &&
+        data.nicknameKey == legacy.nicknameKey &&
+        (!('bestCpm' in legacy) ? !('bestCpm' in data) : ('bestCpm' in data && data.bestCpm == legacy.bestCpm)) &&
+        (!('bestAccuracy' in legacy) ? !('bestAccuracy' in data) : ('bestAccuracy' in data && data.bestAccuracy == legacy.bestAccuracy)) &&
+        (!('isTestAccount' in legacy) ? !('isTestAccount' in data) : ('isTestAccount' in data && data.isTestAccount == legacy.isTestAccount)) &&
+        (!('recordEpoch' in legacy) ? !('recordEpoch' in data) : ('recordEpoch' in data && data.recordEpoch == legacy.recordEpoch));
     }
 
     function isValidNicknameLock(data, nicknameKey) {
@@ -90,47 +132,326 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
+    function isValidPlayerStats(data, playerId) {
+      return data.keys().hasAll([
+          'playerId',
+          'totalGames',
+          'wins',
+          'bestFlips',
+          'bestCpm',
+          'totalAccuracySum',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'playerId',
+          'totalGames',
+          'wins',
+          'bestFlips',
+          'bestCpm',
+          'totalAccuracySum',
+          'updatedAt'
+        ]) &&
+        isValidId(data.playerId) &&
+        data.playerId == playerId &&
+        data.totalGames is int &&
+        data.totalGames >= 0 &&
+        data.totalGames <= 100000 &&
+        data.wins is int &&
+        data.wins >= 0 &&
+        data.wins <= data.totalGames &&
+        data.bestFlips is int &&
+        data.bestFlips >= 0 &&
+        data.bestFlips <= 320 &&
+        data.bestCpm is int &&
+        data.bestCpm >= 0 &&
+        data.bestCpm <= 1800 &&
+        data.totalAccuracySum is number &&
+        data.totalAccuracySum >= 0 &&
+        data.totalAccuracySum <= data.totalGames * 100 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidMatchRecord(data, playerId, matchId) {
+      return data.keys().hasAll([
+          'matchId',
+          'playerId',
+          'flips',
+          'aiFlips',
+          'aiSpeed',
+          'won',
+          'cpm',
+          'rawCpm',
+          'accuracy',
+          'rank',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'matchId',
+          'playerId',
+          'flips',
+          'aiFlips',
+          'aiSpeed',
+          'won',
+          'cpm',
+          'rawCpm',
+          'accuracy',
+          'rank',
+          'createdAt'
+        ]) &&
+        isValidId(data.matchId) &&
+        data.matchId == matchId &&
+        isValidId(data.playerId) &&
+        data.playerId == playerId &&
+        data.flips is int &&
+        data.flips >= 0 &&
+        data.flips <= 320 &&
+        data.aiFlips is int &&
+        data.aiFlips >= 0 &&
+        data.aiFlips <= 500 &&
+        data.aiSpeed in [200, 400, 600, 800] &&
+        data.won is bool &&
+        data.won == (data.flips > data.aiFlips) &&
+        data.cpm is int &&
+        data.cpm >= 0 &&
+        data.cpm <= 1800 &&
+        data.rawCpm is int &&
+        data.rawCpm >= 0 &&
+        data.rawCpm <= 2500 &&
+        data.accuracy is number &&
+        data.accuracy >= 0 &&
+        data.accuracy <= 100 &&
+        isValidRank(data.rank) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidPlayerControl(data, playerId) {
+      return data.keys().hasAll([
+          'playerId',
+          'recordEpoch',
+          'forcedBestFlips',
+          'isRemoved',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'playerId',
+          'recordEpoch',
+          'forcedBestFlips',
+          'isRemoved',
+          'forcedNickname',
+          'updatedAt'
+        ]) &&
+        isValidId(data.playerId) &&
+        data.playerId == playerId &&
+        data.recordEpoch is int &&
+        data.recordEpoch >= 1 &&
+        data.recordEpoch <= 1000000 &&
+        data.forcedBestFlips is int &&
+        data.forcedBestFlips >= 0 &&
+        data.forcedBestFlips <= 320 &&
+        data.isRemoved is bool &&
+        (!('forcedNickname' in data) || isValidNickname(data.forcedNickname)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidModerationReport(data, reportId) {
+      return data.keys().hasAll([
+          'reportId',
+          'playerId',
+          'nickname',
+          'category',
+          'status',
+          'reason',
+          'flips',
+          'aiFlips',
+          'aiSpeed',
+          'cpm',
+          'rawCpm',
+          'accuracy',
+          'elapsedSec',
+          'untrustedCount',
+          'bulkInjectionCount',
+          'pasteBlockedCount',
+          'interKeyMeanMs',
+          'interKeyStdDevMs',
+          'paceCpms',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'reportId',
+          'playerId',
+          'nickname',
+          'category',
+          'status',
+          'reason',
+          'flips',
+          'aiFlips',
+          'aiSpeed',
+          'cpm',
+          'rawCpm',
+          'accuracy',
+          'elapsedSec',
+          'untrustedCount',
+          'bulkInjectionCount',
+          'pasteBlockedCount',
+          'interKeyMeanMs',
+          'interKeyStdDevMs',
+          'paceCpms',
+          'createdAt',
+          'reviewedAt',
+          'adminAction'
+        ]) &&
+        isValidId(data.reportId) &&
+        data.reportId == reportId &&
+        isValidId(data.playerId) &&
+        data.nickname is string &&
+        data.nickname.size() >= 1 &&
+        data.nickname.size() <= 16 &&
+        data.category in ['high_score', 'suspicious'] &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.reason is string &&
+        data.reason.size() >= 1 &&
+        data.reason.size() <= 200 &&
+        data.flips is int &&
+        data.flips >= 0 &&
+        data.flips <= 1000 &&
+        data.aiFlips is int &&
+        data.aiFlips >= 0 &&
+        data.aiFlips <= 1000 &&
+        data.aiSpeed in [200, 400, 600, 800] &&
+        data.cpm is int &&
+        data.cpm >= 0 &&
+        data.cpm <= 10000 &&
+        data.rawCpm is int &&
+        data.rawCpm >= 0 &&
+        data.rawCpm <= 15000 &&
+        data.accuracy is number &&
+        data.accuracy >= 0 &&
+        data.accuracy <= 100 &&
+        data.elapsedSec is number &&
+        data.elapsedSec >= 0 &&
+        data.elapsedSec <= 120 &&
+        data.untrustedCount is int &&
+        data.untrustedCount >= 0 &&
+        data.untrustedCount <= 10000 &&
+        data.bulkInjectionCount is int &&
+        data.bulkInjectionCount >= 0 &&
+        data.bulkInjectionCount <= 10000 &&
+        data.pasteBlockedCount is int &&
+        data.pasteBlockedCount >= 0 &&
+        data.pasteBlockedCount <= 10000 &&
+        data.interKeyMeanMs is number &&
+        data.interKeyMeanMs >= 0 &&
+        data.interKeyMeanMs <= 10000 &&
+        data.interKeyStdDevMs is number &&
+        data.interKeyStdDevMs >= 0 &&
+        data.interKeyStdDevMs <= 10000 &&
+        data.paceCpms is list &&
+        data.paceCpms.size() == 6 &&
+        data.paceCpms[0] is int &&
+        data.paceCpms[0] >= 0 &&
+        data.paceCpms[0] <= 10000 &&
+        data.createdAt is timestamp &&
+        (!('reviewedAt' in data) || data.reviewedAt is timestamp) &&
+        (!('adminAction' in data) || (data.adminAction is string && data.adminAction.size() >= 1 && data.adminAction.size() <= 40));
+    }
+
     // Connection check path
     match /test/connection {
       allow get: if true;
     }
 
-    // Unified global leaderboard: one document per playerId
+    // Unified global leaderboard: one document per playerId (UID for signed-in Google players)
     match /leaderboard/{playerId} {
       allow get: if isValidId(playerId);
       allow list: if resource.data.bestFlips >= 0;
 
       allow create: if isValidId(playerId) &&
         isValidLeaderboardEntry(incoming(), playerId) &&
-        existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
-        getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId;
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == playerId &&
+            'ownerUid' in incoming() &&
+            incoming().ownerUid == request.auth.uid &&
+            incoming().nicknameKey != 'semistry' &&
+            existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
+            getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId &&
+            (
+              (
+                !('migratedFromId' in incoming()) &&
+                !('isTestAccount' in incoming()) &&
+                !('recordEpoch' in incoming()) &&
+                (
+                  incoming().bestFlips == 0 ||
+                  (
+                    incoming().bestFlips <= 219 &&
+                    !exists(/databases/$(database)/documents/playerControls/$(playerId))
+                  )
+                )
+              ) ||
+              (
+                'migratedFromId' in incoming() &&
+                exists(/databases/$(database)/documents/leaderboard/$(incoming().migratedFromId)) &&
+                !existsAfter(/databases/$(database)/documents/leaderboard/$(incoming().migratedFromId)) &&
+                matchesLegacyEntry(
+                  incoming(),
+                  get(/databases/$(database)/documents/leaderboard/$(incoming().migratedFromId)).data
+                )
+              )
+            )
+          )
+        );
 
       allow update: if isValidId(playerId) &&
         isValidLeaderboardEntry(incoming(), playerId) &&
         incoming().playerId == existing().playerId &&
+        isVerifiedUser() &&
         (
-          // Action 1: Update personal high score (strictly increasing)
+          isAdmin() ||
           (
-            incoming().diff(existing()).affectedKeys().hasOnly(['bestFlips', 'rank', 'updatedAt']) &&
-            incoming().bestFlips > existing().bestFlips
-          ) ||
-          // Action 2: Rename nickname to a different key atomically
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'nicknameKey', 'updatedAt']) &&
-            incoming().nicknameKey != existing().nicknameKey &&
-            existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
-            getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId &&
-            !existsAfter(/databases/$(database)/documents/nicknames/$(existing().nicknameKey))
-          ) ||
-          // Action 3: Change display casing of the same nicknameKey
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'updatedAt']) &&
-            incoming().nicknameKey == existing().nicknameKey &&
-            incoming().nickname != existing().nickname
+            request.auth.uid == playerId &&
+            (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid) &&
+            (
+              // Action 1: Update personal high score (< 220 flips; >= 220 requires admin approval)
+              (
+                incoming().diff(existing()).affectedKeys().hasAll(['bestFlips', 'rank', 'updatedAt']) &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['bestFlips', 'rank', 'updatedAt', 'bestCpm', 'bestAccuracy']) &&
+                incoming().bestFlips > existing().bestFlips &&
+                incoming().bestFlips <= 219
+              ) ||
+              // Action 2: Rename nickname to a different key atomically
+              (
+                incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'nicknameKey', 'updatedAt']) &&
+                incoming().nicknameKey != 'semistry' &&
+                incoming().nicknameKey != existing().nicknameKey &&
+                existsAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)) &&
+                getAfter(/databases/$(database)/documents/nicknames/$(incoming().nicknameKey)).data.playerId == playerId &&
+                !existsAfter(/databases/$(database)/documents/nicknames/$(existing().nicknameKey))
+              ) ||
+              // Action 3: Change display casing of the same nicknameKey
+              (
+                incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'updatedAt']) &&
+                incoming().nicknameKey != 'semistry' &&
+                incoming().nicknameKey == existing().nicknameKey &&
+                incoming().nickname != existing().nickname
+              )
+            )
           )
         );
 
-      allow delete: if false;
+      allow delete: if isValidId(playerId) &&
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            !('ownerUid' in existing()) &&
+            existing().nicknameKey != 'semistry' &&
+            existsAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)) &&
+            'migratedFromId' in getAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)).data &&
+            getAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)).data.migratedFromId == playerId
+          )
+        );
     }
 
     // Atomic uniqueness index for nicknames
@@ -140,17 +461,152 @@ service cloud.firestore {
 
       allow create: if isValidNicknameKey(nicknameKey) &&
         isValidNicknameLock(incoming(), nicknameKey) &&
-        existsAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)) &&
-        getAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)).data.nicknameKey == nicknameKey;
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            nicknameKey != 'semistry' &&
+            incoming().playerId == request.auth.uid &&
+            existsAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)) &&
+            getAfter(/databases/$(database)/documents/leaderboard/$(incoming().playerId)).data.nicknameKey == nicknameKey
+          )
+        );
 
       allow update: if isValidNicknameKey(nicknameKey) &&
         isValidNicknameLock(incoming(), nicknameKey) &&
-        incoming().playerId == existing().playerId;
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            nicknameKey != 'semistry' &&
+            incoming().playerId == request.auth.uid &&
+            (
+              incoming().playerId == existing().playerId ||
+              (
+                existsAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)) &&
+                'migratedFromId' in getAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)).data &&
+                getAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)).data.migratedFromId == existing().playerId &&
+                getAfter(/databases/$(database)/documents/leaderboard/$(request.auth.uid)).data.nicknameKey == nicknameKey
+              )
+            )
+          )
+        );
 
       allow delete: if isValidNicknameKey(nicknameKey) &&
-        existsAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)) &&
-        getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.playerId == existing().playerId &&
-        getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.nicknameKey != nicknameKey;
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            existing().playerId == request.auth.uid &&
+            existsAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)) &&
+            getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.playerId == existing().playerId &&
+            getAfter(/databases/$(database)/documents/leaderboard/$(existing().playerId)).data.nicknameKey != nicknameKey
+          )
+        );
+    }
+
+    // Cumulative player stats and append-only verified match records
+    match /playerStats/{playerId} {
+      allow get: if isValidId(playerId) && isOwnerOrAdmin(playerId);
+      allow list: if false;
+
+      allow create: if isValidId(playerId) &&
+        isValidPlayerStats(incoming(), playerId) &&
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == playerId &&
+            incoming().totalGames >= 1 &&
+            (
+              incoming().bestFlips <= 219 ||
+              (
+                existsAfter(/databases/$(database)/documents/leaderboard/$(playerId)) &&
+                'migratedFromId' in getAfter(/databases/$(database)/documents/leaderboard/$(playerId)).data &&
+                incoming().bestFlips <= getAfter(/databases/$(database)/documents/leaderboard/$(playerId)).data.bestFlips
+              )
+            )
+          )
+        );
+
+      allow update: if isValidId(playerId) &&
+        isValidPlayerStats(incoming(), playerId) &&
+        incoming().playerId == existing().playerId &&
+        isVerifiedUser() &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == playerId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalGames',
+              'wins',
+              'bestFlips',
+              'bestCpm',
+              'totalAccuracySum',
+              'updatedAt'
+            ]) &&
+            incoming().totalGames == existing().totalGames + 1 &&
+            incoming().wins >= existing().wins &&
+            incoming().wins <= existing().wins + 1 &&
+            incoming().bestFlips >= existing().bestFlips &&
+            incoming().bestFlips <= 219 &&
+            incoming().bestCpm >= existing().bestCpm
+          )
+        );
+
+      allow delete: if isValidId(playerId) && isAdmin();
+
+      match /matches/{matchId} {
+        allow get: if isValidId(playerId) && isValidId(matchId) && isOwnerOrAdmin(playerId);
+        allow list: if isOwnerOrAdmin(playerId) && resource.data.playerId == playerId;
+
+        allow create: if isValidId(playerId) &&
+          isValidId(matchId) &&
+          isValidMatchRecord(incoming(), playerId, matchId) &&
+          isVerifiedUser() &&
+          (isAdmin() || (request.auth.uid == playerId && incoming().flips <= 219)) &&
+          existsAfter(/databases/$(database)/documents/playerStats/$(playerId));
+
+        allow update: if false;
+        allow delete: if isValidId(playerId) && isValidId(matchId) && isAdmin();
+      }
+    }
+
+    // Admin-managed server epoch directives (prevents localStorage replay after delete/reset)
+    match /playerControls/{playerId} {
+      allow get: if isValidId(playerId) && isOwnerOrAdmin(playerId);
+      allow list: if false;
+      allow create, update: if isValidId(playerId) &&
+        isAdmin() &&
+        isValidPlayerControl(incoming(), playerId);
+      allow delete: if isValidId(playerId) && isAdmin();
+    }
+
+    // Moderation queue for >=220 flips approval & suspicious anti-cheat reports
+    match /moderationReports/{reportId} {
+      allow get: if isValidId(reportId) && isAdmin();
+      allow list: if isAdmin() && resource.data.status in ['pending', 'approved', 'rejected'];
+
+      allow create: if isValidId(reportId) &&
+        isValidModerationReport(incoming(), reportId) &&
+        isVerifiedUser() &&
+        (isAdmin() || incoming().playerId == request.auth.uid) &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        !('reviewedAt' in incoming()) &&
+        !('adminAction' in incoming()) &&
+        (incoming().category == 'suspicious' || incoming().flips >= 220);
+
+      allow update: if isValidId(reportId) &&
+        isAdmin() &&
+        isValidModerationReport(incoming(), reportId) &&
+        incoming().reportId == existing().reportId &&
+        incoming().playerId == existing().playerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedAt', 'adminAction', 'nickname']) &&
+        incoming().reviewedAt == request.time;
+
+      allow delete: if isValidId(reportId) && isAdmin();
     }
   }
 }

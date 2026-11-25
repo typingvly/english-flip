@@ -1,27 +1,47 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { COPY } from '../i18n/translations';
 import { validateNickname } from '../services/leaderboard';
-import { ThemeConfig } from '../types/game';
+import { AppLanguage, ThemeConfig } from '../types/game';
 
 interface NicknameModalProps {
   open: boolean;
+  initialNickname?: string;
+  lang: AppLanguage;
   theme: ThemeConfig;
   onSubmit: (nickname: string) => Promise<void>;
+  onDismiss?: () => void;
 }
 
-export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
-  const [value, setValue] = useState('');
+export function NicknameModal({
+  open,
+  initialNickname = '',
+  lang,
+  theme,
+  onSubmit,
+  onDismiss,
+}: NicknameModalProps) {
+  const [value, setValue] = useState(initialNickname);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (open) {
+      setValue(initialNickname);
+      setError(null);
+    }
+  }, [open, initialNickname]);
+
   if (!open) return null;
+
+  const t = COPY[lang].nicknameModal;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (submitting) return;
 
-    const check = validateNickname(value);
+    const check = validateNickname(value, lang);
     if (!check.valid) {
-      setError(check.error || '닉네임을 확인해 주세요.');
+      setError(check.error || t.checkError);
       return;
     }
 
@@ -30,7 +50,7 @@ export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
     try {
       await onSubmit(check.trimmed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '닉네임 등록 중 오류가 발생했습니다.');
+      setError(err instanceof Error ? err.message : t.submitError);
     } finally {
       setSubmitting(false);
     }
@@ -42,7 +62,7 @@ export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
       style={{ backgroundColor: 'rgba(0, 0, 0, 0.58)' }}
       role="dialog"
       aria-modal="true"
-      aria-label="닉네임 설정"
+      aria-label={t.dialogAria}
     >
       <div
         className="w-full max-w-[420px] rounded-2xl p-7 shadow-2xl"
@@ -52,13 +72,13 @@ export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
         }}
       >
         <div className="text-xs tracking-widest uppercase" style={{ color: theme.muted }}>
-          Welcome
+          {t.welcome}
         </div>
-        <h2 className="text-xl font-semibold mt-1.5 tracking-tight">닉네임 설정</h2>
+        <h2 className="text-xl font-semibold mt-1.5 tracking-tight">{t.title}</h2>
         <p className="text-sm mt-2 leading-relaxed" style={{ color: theme.muted }}>
-          글로벌 리더보드에 사용할 고유 닉네임을 입력해 주세요.
+          {t.descLine1}
           <br />
-          닉네임은 추후 소리 설정에서 변경할 수 있습니다.
+          {t.descLine2}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-3">
@@ -72,8 +92,8 @@ export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
               }}
               maxLength={16}
               autoFocus
-              placeholder="닉네임 입력 (2~16자)"
-              aria-label="닉네임"
+              placeholder={t.placeholder}
+              aria-label={t.ariaInput}
               className="w-full rounded-xl px-4 py-3 font-mono-typing text-base outline-none transition-colors"
               style={{
                 backgroundColor: theme.surface,
@@ -83,21 +103,37 @@ export function NicknameModal({ open, theme, onSubmit }: NicknameModalProps) {
               }}
             />
             <div className="mt-1.5 text-[11px]" style={{ color: error ? theme.aiTile : theme.muted }}>
-              {error ?? '2~16자 한글, 영문, 숫자, 밑줄(_), 하이픈(-) 사용 가능 (중복 불가)'}
+              {error ?? t.ruleHint}
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-3 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 cursor-pointer disabled:opacity-50"
-            style={{
-              backgroundColor: theme.accent,
-              color: theme.accentText,
-            }}
-          >
-            {submitting ? '확인 중...' : '시작하기'}
-          </button>
+          <div className="flex items-center gap-2">
+            {onDismiss && (
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={onDismiss}
+                className="px-4 py-3 rounded-xl text-sm font-medium transition-opacity hover:opacity-85 cursor-pointer disabled:opacity-50"
+                style={{
+                  backgroundColor: theme.surface,
+                  color: theme.muted,
+                }}
+              >
+                {t.later}
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 py-3 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 cursor-pointer disabled:opacity-50"
+              style={{
+                backgroundColor: theme.accent,
+                color: theme.accentText,
+              }}
+            >
+              {submitting ? t.submitting : t.submit}
+            </button>
+          </div>
         </form>
       </div>
     </div>

@@ -1,22 +1,39 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Check, RotateCcw, Volume2, X } from 'lucide-react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { User as FirebaseUser } from 'firebase/auth';
+import { Check, ImagePlus, LogIn, LogOut, RotateCcw, Trash2, Volume2, X } from 'lucide-react';
 import { FONT_LIST } from '../data/fonts';
 import { buildCustomTheme, DEFAULT_CUSTOM_THEME, PRESET_THEME_LIST } from '../data/themes';
+import { COPY, getFontCategoryLabel, getThemeDisplay } from '../i18n/translations';
 import { validateNickname } from '../services/leaderboard';
-import { CustomThemeColors, FontId, GameSettings, ThemeConfig, ThemeId } from '../types/game';
+import {
+  AppLanguage,
+  CustomThemeColors,
+  FontId,
+  GameSettings,
+  ThemeConfig,
+  ThemeId,
+} from '../types/game';
 import { playFlipSound } from '../utils/sound';
+
+export type SettingsTab = 'design' | 'gameplay' | 'sound';
 
 interface SettingsModalProps {
   open: boolean;
+  initialTab?: SettingsTab;
   settings: GameSettings;
   nickname: string;
+  authUser: FirebaseUser | null;
+  authBusy?: boolean;
+  customBgUrl: string | null;
   theme: ThemeConfig;
   onUpdateSettings: (patch: Partial<GameSettings>) => void;
+  onUploadBackground: (file: File) => Promise<void>;
+  onRemoveBackground: () => Promise<void>;
+  onSignInGoogle: () => void;
+  onSignOutGoogle: () => void;
   onChangeNickname: (nextNickname: string) => Promise<void>;
   onClose: () => void;
 }
-
-type SettingsTab = 'design' | 'gameplay' | 'sound';
 
 interface ToggleRowProps {
   label: string;
@@ -53,7 +70,10 @@ function ToggleRow({
       }}
     >
       <div className="min-w-0">
-        <div className={`${compact ? 'text-[13px]' : 'text-sm'} font-medium`} style={{ color: theme.text }}>
+        <div
+          className={`${compact ? 'text-[13px]' : 'text-sm'} font-medium`}
+          style={{ color: theme.text }}
+        >
           {label}
         </div>
         {description && (
@@ -83,50 +103,82 @@ function ToggleRow({
 
 const INTERVAL_PRESETS = [0.3, 0.5, 1.0, 2.0];
 
-const CUSTOM_COLOR_FIELDS: ReadonlyArray<{
-  key: keyof CustomThemeColors;
-  label: string;
-}> = [
-  { key: 'bg', label: '배경색' },
-  { key: 'text', label: '글자색' },
-  { key: 'userTile', label: '내 판 색' },
-  { key: 'aiTile', label: '상대 판 색' },
-  { key: 'accent', label: '강조색' },
-];
-
 export function SettingsModal({
   open,
+  initialTab,
   settings,
   nickname,
+  authUser,
+  authBusy,
+  customBgUrl,
   theme,
   onUpdateSettings,
+  onUploadBackground,
+  onRemoveBackground,
+  onSignInGoogle,
+  onSignOutGoogle,
   onChangeNickname,
   onClose,
 }: SettingsModalProps) {
-  const [tab, setTab] = useState<SettingsTab>('design');
+  const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'design');
   const [intervalDraft, setIntervalDraft] = useState<string>(String(settings.metricsInterval));
   const [nicknameDraft, setNicknameDraft] = useState<string>(nickname);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [nicknameSuccess, setNicknameSuccess] = useState<boolean>(false);
   const [nicknameSaving, setNicknameSaving] = useState<boolean>(false);
+  const [bgUploading, setBgUploading] = useState<boolean>(false);
+  const [bgError, setBgError] = useState<string | null>(null);
+
+  const lang: AppLanguage = settings.language;
+  const t = COPY[lang].settings;
+  const isSignedIn = Boolean(authUser && authUser.emailVerified);
+
+  const customColorFields: ReadonlyArray<{
+    key: keyof CustomThemeColors;
+    label: string;
+  }> = [
+    { key: 'bg', label: t.colorBg },
+    { key: 'text', label: t.colorText },
+    { key: 'userTile', label: t.colorUserTile },
+    { key: 'aiTile', label: t.colorAiTile },
+    { key: 'accent', label: t.colorAccent },
+  ];
 
   useEffect(() => {
     if (open) {
+      if (initialTab) setTab(initialTab);
       setNicknameDraft(nickname);
       setNicknameError(null);
       setNicknameSuccess(false);
+      setBgError(null);
     }
-  }, [open, nickname]);
+  }, [open, nickname, initialTab]);
 
   if (!open) return null;
 
+  const handleBackgroundFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || bgUploading) return;
+
+    setBgError(null);
+    setBgUploading(true);
+    try {
+      await onUploadBackground(file);
+    } catch (err) {
+      setBgError(err instanceof Error ? err.message : t.bgUploadError);
+    } finally {
+      setBgUploading(false);
+    }
+  };
+
   const handleNicknameSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (nicknameSaving) return;
+    if (nicknameSaving || !isSignedIn) return;
 
-    const check = validateNickname(nicknameDraft);
+    const check = validateNickname(nicknameDraft, lang);
     if (!check.valid) {
-      setNicknameError(check.error || '닉네임을 확인해 주세요.');
+      setNicknameError(check.error || t.nicknameCheckError);
       setNicknameSuccess(false);
       return;
     }
@@ -144,9 +196,7 @@ export function SettingsModal({
       await onChangeNickname(check.trimmed);
       setNicknameSuccess(true);
     } catch (err) {
-      setNicknameError(
-        err instanceof Error ? err.message : '닉네임 변경 중 오류가 발생했습니다.',
-      );
+      setNicknameError(err instanceof Error ? err.message : t.nicknameSaveError);
     } finally {
       setNicknameSaving(false);
     }
@@ -173,7 +223,7 @@ export function SettingsModal({
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="설정"
+      aria-label={t.dialogAria}
     >
       <div
         className="w-full max-w-[600px] max-h-[86vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl transition-colors"
@@ -197,7 +247,7 @@ export function SettingsModal({
                 color: tab === 'design' ? theme.accentText : theme.muted,
               }}
             >
-              디자인 설정
+              {t.tabDesign}
             </button>
             <button
               type="button"
@@ -208,7 +258,7 @@ export function SettingsModal({
                 color: tab === 'gameplay' ? theme.accentText : theme.muted,
               }}
             >
-              게임플레이 설정
+              {t.tabGameplay}
             </button>
             <button
               type="button"
@@ -219,14 +269,14 @@ export function SettingsModal({
                 color: tab === 'sound' ? theme.accentText : theme.muted,
               }}
             >
-              소리 설정
+              {t.tabSound}
             </button>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            aria-label="닫기"
+            aria-label={t.close}
             className="w-8 h-8 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80 cursor-pointer shrink-0"
             style={{
               backgroundColor: theme.surfaceElevated,
@@ -242,19 +292,20 @@ export function SettingsModal({
           {tab === 'design' && (
             <>
               <div>
-                <div className="text-sm font-medium mb-1">테마</div>
+                <div className="text-sm font-medium mb-1">{t.themeTitle}</div>
                 <p className="text-xs mb-3.5" style={{ color: theme.muted }}>
-                  선택한 테마는 배경, 타일, 입력창, 상단 타임바에 즉시 적용됩니다.
+                  {t.themeDesc}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[...PRESET_THEME_LIST, buildCustomTheme(settings.customTheme)].map((item) => {
                     const active = settings.themeId === item.id;
+                    const display = getThemeDisplay(item, lang);
                     const leftBg = settings.swapSides ? item.userTile : item.aiTile;
                     const leftText = settings.swapSides ? item.userTileText : item.aiTileText;
-                    const leftLabel = settings.swapSides ? '나' : 'AI';
+                    const leftLabel = settings.swapSides ? t.me : t.ai;
                     const rightBg = settings.swapSides ? item.aiTile : item.userTile;
                     const rightText = settings.swapSides ? item.aiTileText : item.userTileText;
-                    const rightLabel = settings.swapSides ? 'AI' : '나';
+                    const rightLabel = settings.swapSides ? t.ai : t.me;
 
                     return (
                       <button
@@ -270,9 +321,9 @@ export function SettingsModal({
                       >
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div>
-                            <div className="text-sm font-medium leading-tight">{item.name}</div>
+                            <div className="text-sm font-medium leading-tight">{display.name}</div>
                             <div className="text-[11px] mt-0.5" style={{ color: item.muted }}>
-                              {item.subtitle}
+                              {display.subtitle}
                             </div>
                           </div>
                           {active && (
@@ -316,7 +367,7 @@ export function SettingsModal({
                   })}
                 </div>
 
-                {/* Custom Theme Color Editor (shown when 10th theme '사용자 설정' is selected) */}
+                {/* Custom Theme Color Editor */}
                 {settings.themeId === 'custom' && (
                   <div
                     className="mt-3 rounded-xl p-4 space-y-3"
@@ -325,10 +376,10 @@ export function SettingsModal({
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <div className="text-xs font-semibold" style={{ color: theme.text }}>
-                          사용자 테마 색상 편집
+                          {t.customEditorTitle}
                         </div>
                         <div className="text-[11px] mt-0.5" style={{ color: theme.muted }}>
-                          타일 글자와 보조 표면 색상은 배경 명도에 맞춰 자동 보정됩니다.
+                          {t.customEditorDesc}
                         </div>
                       </div>
                       <button
@@ -336,19 +387,19 @@ export function SettingsModal({
                         onClick={() =>
                           onUpdateSettings({ customTheme: DEFAULT_CUSTOM_THEME })
                         }
-                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-opacity hover:opacity-80 cursor-pointer shrink-0"
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-opacity hover:opacity-80 cursor-pointer shrink-0 whitespace-nowrap"
                         style={{
                           backgroundColor: theme.bg,
                           color: theme.muted,
                         }}
                       >
                         <RotateCcw className="w-3 h-3" />
-                        <span>초기화</span>
+                        <span>{t.reset}</span>
                       </button>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {CUSTOM_COLOR_FIELDS.map((field) => {
+                      {customColorFields.map((field) => {
                         const value = settings.customTheme[field.key];
                         return (
                           <label
@@ -376,7 +427,10 @@ export function SettingsModal({
                               />
                             </span>
                             <div className="min-w-0">
-                              <div className="text-xs font-medium leading-tight" style={{ color: theme.text }}>
+                              <div
+                                className="text-xs font-medium leading-tight"
+                                style={{ color: theme.text }}
+                              >
                                 {field.label}
                               </div>
                               <div
@@ -396,9 +450,9 @@ export function SettingsModal({
 
               {/* Font Selector */}
               <div>
-                <div className="text-sm font-medium mb-1">글꼴</div>
+                <div className="text-sm font-medium mb-1">{t.fontTitle}</div>
                 <p className="text-xs mb-3.5" style={{ color: theme.muted }}>
-                  단어 판과 입력창, 지표에 적용할 가독성 좋은 글꼴을 선택하세요.
+                  {t.fontDesc}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {FONT_LIST.map((font) => {
@@ -424,7 +478,7 @@ export function SettingsModal({
                                 opacity: active ? 0.78 : 1,
                               }}
                             >
-                              {font.category}
+                              {getFontCategoryLabel(font.id, font.category, lang)}
                             </span>
                           </div>
                           <div
@@ -452,46 +506,245 @@ export function SettingsModal({
                   })}
                 </div>
               </div>
+
+              {/* Custom Background Photo Section */}
+              <div>
+                <div className="text-sm font-medium mb-1">{t.bgPhotoTitle}</div>
+                <p className="text-xs mb-3.5" style={{ color: theme.muted }}>
+                  {t.bgPhotoDesc}
+                </p>
+
+                <div
+                  className="rounded-xl p-4 space-y-4"
+                  style={{ backgroundColor: theme.surface }}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-16 h-11 rounded-lg overflow-hidden shrink-0 flex items-center justify-center"
+                        style={{ backgroundColor: theme.bg }}
+                      >
+                        {customBgUrl ? (
+                          <img
+                            src={customBgUrl}
+                            alt={t.bgPreviewAlt}
+                            className="w-full h-full object-cover"
+                            style={{
+                              filter: `blur(${Math.round(settings.backgroundBlur / 3)}px)`,
+                              transform: 'scale(1.1)',
+                            }}
+                          />
+                        ) : (
+                          <ImagePlus className="w-4 h-4" style={{ color: theme.muted }} />
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium" style={{ color: theme.text }}>
+                          {customBgUrl ? t.bgActive : t.bgDefault}
+                        </div>
+                        <div className="text-[11px] mt-0.5" style={{ color: theme.muted }}>
+                          {t.bgMeta}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {customBgUrl && (
+                        <button
+                          type="button"
+                          onClick={() => void onRemoveBackground()}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-opacity hover:opacity-85 cursor-pointer whitespace-nowrap"
+                          style={{
+                            backgroundColor: theme.bg,
+                            color: theme.aiTile,
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{t.delete}</span>
+                        </button>
+                      )}
+
+                      <label
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-opacity hover:opacity-90 cursor-pointer whitespace-nowrap"
+                        style={{
+                          backgroundColor: theme.accent,
+                          color: theme.accentText,
+                        }}
+                      >
+                        <ImagePlus className="w-3.5 h-3.5" />
+                        <span>
+                          {bgUploading ? t.uploading : customBgUrl ? t.change : t.upload}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          disabled={bgUploading}
+                          onChange={handleBackgroundFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {bgError && (
+                    <div className="text-xs" style={{ color: theme.aiTile }}>
+                      {bgError}
+                    </div>
+                  )}
+
+                  {customBgUrl && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div
+                        className="rounded-xl px-3.5 py-2.5 space-y-2"
+                        style={{ backgroundColor: theme.bg }}
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span style={{ color: theme.text }}>{t.bgBlur}</span>
+                          <span
+                            className="font-mono-typing tabular-nums"
+                            style={{ color: theme.muted }}
+                          >
+                            {settings.backgroundBlur}px
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={24}
+                          step={1}
+                          value={settings.backgroundBlur}
+                          onChange={(e) =>
+                            onUpdateSettings({ backgroundBlur: Number(e.target.value) })
+                          }
+                          aria-label={t.bgBlur}
+                          className="w-full cursor-pointer"
+                          style={{ accentColor: theme.accent }}
+                        />
+                      </div>
+
+                      <div
+                        className="rounded-xl px-3.5 py-2.5 space-y-2"
+                        style={{ backgroundColor: theme.bg }}
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span style={{ color: theme.text }}>{t.bgDim}</span>
+                          <span
+                            className="font-mono-typing tabular-nums"
+                            style={{ color: theme.muted }}
+                          >
+                            {settings.backgroundDim}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={85}
+                          step={5}
+                          value={settings.backgroundDim}
+                          onChange={(e) =>
+                            onUpdateSettings({ backgroundDim: Number(e.target.value) })
+                          }
+                          aria-label={t.bgDim}
+                          className="w-full cursor-pointer"
+                          style={{ accentColor: theme.accent }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           )}
 
           {tab === 'gameplay' && (
             <div className="space-y-2.5">
+              {/* Language Selector (Korean / English only) */}
+              <div
+                className="rounded-xl px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
+                style={{ backgroundColor: theme.surface }}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium" style={{ color: theme.text }}>
+                    {t.languageTitle}
+                  </div>
+                  <div className="text-xs mt-0.5 leading-relaxed" style={{ color: theme.muted }}>
+                    {t.languageDesc}
+                  </div>
+                </div>
+
+                <div
+                  className="inline-flex items-center gap-1 p-1 rounded-lg shrink-0"
+                  style={{ backgroundColor: theme.bg }}
+                >
+                  {(
+                    [
+                      ['ko', '한국어'],
+                      ['en', 'English'],
+                    ] as const
+                  ).map(([code, label]) => {
+                    const active = settings.language === code;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        onClick={() => onUpdateSettings({ language: code })}
+                        className="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                        style={{
+                          backgroundColor: active ? theme.accent : 'transparent',
+                          color: active ? theme.accentText : theme.muted,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <ToggleRow
-                label="진영 변경"
-                description="AI 판(기본 왼쪽)과 내 판(기본 오른쪽)의 좌우 위치를 맞바꿉니다."
+                label={t.focusMode}
+                description={t.focusModeDesc}
+                checked={settings.focusMode}
+                onChange={(val) => onUpdateSettings({ focusMode: val })}
+                theme={theme}
+              />
+
+              <ToggleRow
+                label={t.swapSides}
+                description={t.swapSidesDesc}
                 checked={settings.swapSides}
                 onChange={(val) => onUpdateSettings({ swapSides: val })}
                 theme={theme}
               />
 
               <ToggleRow
-                label="빈 입력 상태에서 Space 입력 방지"
-                description="아무 글자도 입력하지 않았을 때 실수로 Space가 입력되는 것을 막습니다."
+                label={t.preventEmptySpace}
+                description={t.preventEmptySpaceDesc}
                 checked={settings.preventEmptySpace}
                 onChange={(val) => onUpdateSettings({ preventEmptySpace: val })}
                 theme={theme}
               />
 
               <ToggleRow
-                label="상단 시간 바 표시"
-                description="화면 최상단에 테마 색상 기반의 남은 시간 진행 바를 표시합니다."
+                label={t.showTimeBar}
+                description={t.showTimeBarDesc}
                 checked={settings.showTimeBar}
                 onChange={(val) => onUpdateSettings({ showTimeBar: val })}
                 theme={theme}
               />
 
               <ToggleRow
-                label="뒤집은 판 개수 숨기기"
-                description="플레이 중 나와 AI 봇이 뒤집은 판 점수 표시를 숨깁니다."
+                label={t.hideScores}
+                description={t.hideScoresDesc}
                 checked={settings.hideScores}
                 onChange={(val) => onUpdateSettings({ hideScores: val })}
                 theme={theme}
               />
 
               <ToggleRow
-                label="남은 시간 숨기기"
-                description="플레이 중 중앙의 대형 남은 시간 타이머를 숨깁니다."
+                label={t.hideTimer}
+                description={t.hideTimerDesc}
                 checked={settings.hideTimer}
                 onChange={(val) => onUpdateSettings({ hideTimer: val })}
                 theme={theme}
@@ -506,10 +759,10 @@ export function SettingsModal({
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="text-sm font-medium" style={{ color: theme.text }}>
-                      간단한 지표 한 줄 표시
+                      {t.metricsBar}
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: theme.muted }}>
-                      게임 화면에 부연 설명 없이 숫자만 한 줄로 간결하게 표시합니다. (예: 0:35 · 688 · 813)
+                      {t.metricsBarDesc}
                     </div>
                   </div>
 
@@ -539,7 +792,7 @@ export function SettingsModal({
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <ToggleRow
-                        label="남은 시간 초수"
+                        label={t.metricsTime}
                         checked={settings.showMetricsTime}
                         onChange={(val) => onUpdateSettings({ showMetricsTime: val })}
                         theme={theme}
@@ -570,10 +823,10 @@ export function SettingsModal({
                     >
                       <div>
                         <div className="text-[13px] font-medium" style={{ color: theme.text }}>
-                          지표 갱신 시간 (초)
+                          {t.metricsIntervalTitle}
                         </div>
                         <div className="text-[11px]" style={{ color: theme.muted }}>
-                          최소 0.3초 이상 · 기본값 1초
+                          {t.metricsIntervalDesc}
                         </div>
                       </div>
 
@@ -613,7 +866,7 @@ export function SettingsModal({
                             }
                           }}
                           onBlur={handleIntervalBlur}
-                          aria-label="갱신 시간(초)"
+                          aria-label={t.metricsIntervalAria}
                           className="w-16 px-2 py-1 rounded-md font-mono-typing text-xs text-center outline-none tabular-nums"
                           style={{
                             backgroundColor: theme.surface,
@@ -631,8 +884,8 @@ export function SettingsModal({
           {tab === 'sound' && (
             <div className="space-y-2.5">
               <ToggleRow
-                label="효과음 사용"
-                description="게임 내 타이핑 및 판 뒤집기 효과음을 켜거나 끕니다."
+                label={t.sfxEnabled}
+                description={t.sfxEnabledDesc}
                 checked={settings.sfxEnabled}
                 onChange={(val) => onUpdateSettings({ sfxEnabled: val })}
                 theme={theme}
@@ -648,10 +901,10 @@ export function SettingsModal({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium" style={{ color: theme.text }}>
-                      효과음 볼륨
+                      {t.sfxVolume}
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: theme.muted }}>
-                      입력음과 판 뒤집기 효과음 크기를 조절합니다.
+                      {t.sfxVolumeDesc}
                     </div>
                   </div>
 
@@ -670,7 +923,7 @@ export function SettingsModal({
                       }}
                     >
                       <Volume2 className="w-3.5 h-3.5" style={{ color: theme.accent }} />
-                      <span>테스트</span>
+                      <span>{t.test}</span>
                     </button>
                   </div>
                 </div>
@@ -696,15 +949,15 @@ export function SettingsModal({
                       playFlipSound(settings.sfxVolume);
                     }
                   }}
-                  aria-label="효과음 볼륨"
+                  aria-label={t.sfxVolume}
                   className="w-full cursor-pointer"
                   style={{ accentColor: theme.accent }}
                 />
               </div>
 
               <ToggleRow
-                label="입력 사운드"
-                description="단어를 타이핑할 때 가벼운 키 입력음을 재생합니다."
+                label={t.sfxTyping}
+                description={t.sfxTypingDesc}
                 checked={settings.sfxTyping}
                 disabled={!settings.sfxEnabled}
                 onChange={(val) => onUpdateSettings({ sfxTyping: val })}
@@ -712,83 +965,132 @@ export function SettingsModal({
               />
 
               <ToggleRow
-                label="판 뒤집기 사운드"
-                description="내가 상대 판을 뒤집었을 때 효과음을 재생합니다."
+                label={t.sfxFlip}
+                description={t.sfxFlipDesc}
                 checked={settings.sfxFlip}
                 disabled={!settings.sfxEnabled}
                 onChange={(val) => onUpdateSettings({ sfxFlip: val })}
                 theme={theme}
               />
 
-              {/* Nickname Change in Sound Tab */}
+              {/* Google Account Connection Card */}
+              <div
+                className="rounded-xl p-4 mt-1 flex flex-wrap items-center justify-between gap-3"
+                style={{ backgroundColor: theme.surface }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium" style={{ color: theme.text }}>
+                    {t.accountTitle}
+                  </div>
+                  <div className="text-xs mt-0.5 leading-relaxed" style={{ color: theme.muted }}>
+                    {isSignedIn
+                      ? `${authUser?.email || ''} · ${t.accountSignedInDesc}`
+                      : t.accountSignedOutDesc}
+                  </div>
+                </div>
+
+                {isSignedIn ? (
+                  <button
+                    type="button"
+                    disabled={authBusy}
+                    onClick={onSignOutGoogle}
+                    className="px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-opacity hover:opacity-85 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                    style={{
+                      backgroundColor: theme.bg,
+                      color: theme.muted,
+                    }}
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>{t.signOutBtn}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={authBusy}
+                    onClick={onSignInGoogle}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-opacity hover:opacity-90 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                    style={{
+                      backgroundColor: theme.accent,
+                      color: theme.accentText,
+                    }}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>{t.signInBtn}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Nickname Change in Sound & Account Tab */}
               <div
                 className="rounded-xl p-4 mt-1"
                 style={{ backgroundColor: theme.surface }}
               >
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <div className="text-sm font-medium" style={{ color: theme.text }}>
-                    닉네임 변경
+                    {t.nicknameTitle}
                   </div>
-                  {nickname && (
+                  {isSignedIn && nickname && (
                     <span className="font-mono-typing text-xs" style={{ color: theme.muted }}>
-                      현재: {nickname}
+                      {t.nicknameCurrent(nickname)}
                     </span>
                   )}
                 </div>
                 <p className="text-xs mb-3" style={{ color: theme.muted }}>
-                  리더보드에 표시되는 고유 닉네임을 변경합니다. 기존 최고 기록은 유지됩니다.
+                  {isSignedIn ? t.nicknameDesc : t.nicknameLoginNeeded}
                 </p>
 
-                <form onSubmit={handleNicknameSubmit} className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <input
-                      type="text"
-                      value={nicknameDraft}
-                      onChange={(e) => {
-                        setNicknameDraft(e.target.value);
-                        if (nicknameError) setNicknameError(null);
-                        if (nicknameSuccess) setNicknameSuccess(false);
-                      }}
-                      maxLength={16}
-                      placeholder="새 닉네임 (2~16자)"
-                      aria-label="새 닉네임"
-                      className="w-full rounded-xl px-3.5 py-2.5 font-mono-typing text-sm outline-none transition-colors"
-                      style={{
-                        backgroundColor: theme.bg,
-                        color: theme.text,
-                        caretColor: theme.accent,
-                      }}
-                    />
-                    <div
-                      className="text-[11px] mt-1.5"
-                      style={{
-                        color: nicknameError
-                          ? theme.aiTile
+                {isSignedIn && (
+                  <form onSubmit={handleNicknameSubmit} className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={nicknameDraft}
+                        onChange={(e) => {
+                          setNicknameDraft(e.target.value);
+                          if (nicknameError) setNicknameError(null);
+                          if (nicknameSuccess) setNicknameSuccess(false);
+                        }}
+                        maxLength={16}
+                        placeholder={t.nicknamePlaceholder}
+                        aria-label={t.nicknameTitle}
+                        className="w-full rounded-xl px-3.5 py-2.5 font-mono-typing text-sm outline-none transition-colors"
+                        style={{
+                          backgroundColor: theme.bg,
+                          color: theme.text,
+                          caretColor: theme.accent,
+                        }}
+                      />
+                      <div
+                        className="text-[11px] mt-1.5"
+                        style={{
+                          color: nicknameError
+                            ? theme.aiTile
+                            : nicknameSuccess
+                              ? theme.accent
+                              : theme.muted,
+                        }}
+                      >
+                        {nicknameError
+                          ? nicknameError
                           : nicknameSuccess
-                            ? theme.accent
-                            : theme.muted,
+                            ? t.nicknameUpdated
+                            : t.nicknameRuleHint}
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={nicknameSaving}
+                      className="px-4 py-2.5 rounded-xl text-sm font-medium transition-opacity hover:opacity-85 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                      style={{
+                        backgroundColor: theme.accent,
+                        color: theme.accentText,
                       }}
                     >
-                      {nicknameError
-                        ? nicknameError
-                        : nicknameSuccess
-                          ? '닉네임이 변경되었습니다.'
-                          : '2~16자 한글, 영문, 숫자, _, - 사용 가능 (중복 불가)'}
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={nicknameSaving}
-                    className="px-4 py-2.5 rounded-xl text-sm font-medium transition-opacity hover:opacity-85 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
-                    style={{
-                      backgroundColor: theme.accent,
-                      color: theme.accentText,
-                    }}
-                  >
-                    {nicknameSaving ? '저장 중' : '변경'}
-                  </button>
-                </form>
+                      {nicknameSaving ? t.saving : t.change}
+                    </button>
+                  </form>
+                )}
               </div>
             </div>
           )}

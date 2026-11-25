@@ -1,17 +1,20 @@
 import { X } from 'lucide-react';
 import { RANKS, getRank } from '../data/words';
-import { ThemeConfig } from '../types/game';
+import { COPY, getDisplayRank } from '../i18n/translations';
+import { AppLanguage, ThemeConfig } from '../types/game';
 
 interface RankModalProps {
   open: boolean;
   bestFlips: number;
+  lang: AppLanguage;
   theme: ThemeConfig;
   onClose: () => void;
 }
 
-export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
+export function RankModal({ open, bestFlips, lang, theme, onClose }: RankModalProps) {
   if (!open) return null;
 
+  const t = COPY[lang].rank;
   const bestRank = bestFlips > 0 ? getRank(bestFlips) : 'Unranked';
   const eliteRanks = RANKS.filter(([, cutoff]) => cutoff >= 150);
   const standardRanks = RANKS.filter(([, cutoff]) => cutoff < 150);
@@ -25,7 +28,7 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="랭크 시스템"
+      aria-label={t.dialogAria}
     >
       <div
         className="w-full max-w-[440px] max-h-[84vh] overflow-y-auto rounded-2xl p-6 sm:p-7 shadow-2xl transition-colors"
@@ -42,7 +45,7 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="닫기"
+            aria-label={t.close}
             className="w-8 h-8 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80 cursor-pointer"
             style={{
               backgroundColor: theme.surface,
@@ -60,13 +63,13 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
         >
           <div>
             <div className="text-xs mb-1" style={{ color: theme.muted }}>
-              개인 최고 기록
+              {t.personalBest}
             </div>
             <div
               className="font-mono-typing text-3xl font-semibold tracking-tight"
               style={{ color: bestFlips >= 150 ? theme.accent : theme.text }}
             >
-              {bestRank}
+              {getDisplayRank(bestRank, lang)}
             </div>
           </div>
           <div className="font-mono-typing text-sm tabular-nums" style={{ color: theme.muted }}>
@@ -74,11 +77,12 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
           </div>
         </div>
 
-        {/* Upper Tiers (X and above): Pure typographic hierarchy & solid accent inversion */}
+        {/* Upper Tiers (X and above) */}
         <div className="space-y-1.5 mb-5">
           {eliteRanks.map(([name, cutoff], idx) => {
             const isCurrent = bestFlips > 0 && bestRank === name;
             const isApex = idx === 0;
+            const displayName = getDisplayRank(name, lang);
 
             if (isApex) {
               return (
@@ -92,10 +96,10 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
                 >
                   <div className="flex items-baseline gap-2.5">
                     <span className="font-mono-typing text-base font-semibold tracking-tight">
-                      {name}
+                      {displayName}
                     </span>
                     {isCurrent && (
-                      <span className="text-[11px] font-medium opacity-80">현재</span>
+                      <span className="text-[11px] font-medium opacity-80">{t.current}</span>
                     )}
                   </div>
                   <span className="font-mono-typing text-xs font-medium tabular-nums opacity-90">
@@ -118,11 +122,11 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
                     className="font-mono-typing text-[15px] font-semibold tracking-tight"
                     style={{ color: theme.accent }}
                   >
-                    {name}
+                    {displayName}
                   </span>
                   {isCurrent && (
                     <span className="text-[11px]" style={{ color: theme.muted }}>
-                      현재
+                      {t.current}
                     </span>
                   )}
                 </div>
@@ -137,7 +141,7 @@ export function RankModal({ open, bestFlips, theme, onClose }: RankModalProps) {
           })}
         </div>
 
-        {/* Standard Tiers (Below X): Quiet compact 3-column typographic index */}
+        {/* Standard Tiers (Below X) */}
         <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">
           {standardRanks.map(([name, cutoff]) => {
             const isCurrent = bestFlips > 0 && bestRank === name;
